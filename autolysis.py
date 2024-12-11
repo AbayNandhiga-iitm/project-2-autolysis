@@ -17,74 +17,57 @@ import numpy as np
 def is_meaningful_column(column, df, unique_min=0.1, unique_max=0.9):
     """Determine if a column is meaningful for visualization."""
     unique_ratio = df[column].nunique() / len(df[column])
-    return unique_min < unique_ratio < unique_max  # Exclude ID-like or overly sparse/dense columns
+    return unique_min < unique_ratio < unique_max
 
-def analyze_categorical_column(column, df):
+def analyze_categorical_column(column, df, top_n=5):
     """Generate insights for categorical columns."""
-    value_counts = df[column].value_counts().head(5)  # Top 5 categories
-    return value_counts
+    return df[column].value_counts().head(top_n)
 
 def generate_plots(df, output_dir):
     """Generate a variety of plots based on the dataset."""
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+    os.makedirs(output_dir, exist_ok=True)
 
     plot_paths = []
 
-    # Safely identify numerical columns that are meaningful for plotting
+    # Numerical columns
     numerical_columns = [col for col in df.select_dtypes(include=[np.number]).columns if is_meaningful_column(col, df)]
-    if len(numerical_columns) == 0:
-        print("No meaningful numerical columns available for plotting.")
-    else:
-        # 1. Histogram for the first meaningful numerical column
+    for i, column in enumerate(numerical_columns[:2]):  # Limit to first 2 meaningful columns
         try:
-            column = numerical_columns[0]
             plt.figure(figsize=(8, 6))
-            sns.histplot(df[column], kde=True, color='teal', bins=30)
-            plt.title(f'Histogram of {column}', fontsize=14)
-            plt.xlabel(column, fontsize=12)
-            plt.ylabel("Frequency", fontsize=12)
+            if i == 0:  # Histogram for the first column
+                sns.histplot(df[column], kde=True, color='teal', bins=30)
+                plt.title(f'Histogram of {column}')
+            else:  # Box plot for the second column
+                sns.boxplot(y=df[column], color='orange')
+                plt.title(f'Box Plot of {column}')
+            
+            plt.xlabel(column)
+            plt.ylabel("Frequency" if i == 0 else column)
             plt.grid(axis='y', linestyle='--', alpha=0.7)
-            plot_path = os.path.join(output_dir, f'{column}_histogram.png')
+
+            plot_path = os.path.join(output_dir, f'{column}_plot.png')
             plt.savefig(plot_path)
             plot_paths.append(plot_path)
             plt.close()
         except Exception as e:
-            print(f"Error plotting histogram for column {column}: {e}")
+            print(f"Error plotting {column}: {e}")
 
-        # 2. Box Plot for the second meaningful numerical column (if available)
-        if len(numerical_columns) > 1:
-            try:
-                column = numerical_columns[1]
-                plt.figure(figsize=(8, 6))
-                sns.boxplot(y=df[column], color='orange')
-                plt.title(f'Box Plot of {column}', fontsize=14)
-                plt.ylabel(column, fontsize=12)
-                plt.grid(axis='y', linestyle='--', alpha=0.7)
-                plot_path = os.path.join(output_dir, f'{column}_box_plot.png')
-                plt.savefig(plot_path)
-                plot_paths.append(plot_path)
-                plt.close()
-            except Exception as e:
-                print(f"Error plotting box plot for column {column}: {e}")
-
-    # Generate plots for categorical columns (limit to 1 plot)
+    # Categorical columns
     categorical_columns = [col for col in df.select_dtypes(exclude=[np.number]).columns if is_meaningful_column(col, df)]
-    for column in categorical_columns[:1]:  # Limit to 1 categorical column
+    for column in categorical_columns[:1]:  # Limit to first categorical column
         try:
             plt.figure(figsize=(8, 6))
             sns.countplot(
                 data=df, 
                 y=column, 
-                hue=column,  # Set the hue to the y variable
-                order=df[column].value_counts().index[:5], 
-                palette='viridis',
-                legend=False  # Disable legend as hue is being used
+                order=df[column].value_counts().index[:5],
+                palette='viridis'
             )
-            plt.title(f'Top Categories in {column}', fontsize=14)
-            plt.ylabel(column, fontsize=12)
-            plt.xlabel("Count", fontsize=12)
+            plt.title(f'Top Categories in {column}')
+            plt.ylabel(column)
+            plt.xlabel("Count")
             plt.grid(axis='x', linestyle='--', alpha=0.7)
+
             plot_path = os.path.join(output_dir, f'{column}_categories.png')
             plt.savefig(plot_path)
             plot_paths.append(plot_path)
@@ -92,94 +75,75 @@ def generate_plots(df, output_dir):
         except Exception as e:
             print(f"Error plotting categories for column {column}: {e}")
 
-    return plot_paths[:2]  # Limit to a maximum of 2 plots
+    return plot_paths
 
 def generate_readme(output_dir, df, plot_paths):
-    """Generate a detailed and engaging README file summarizing the analysis."""
-
-    # Data type summary
+    """Generate a detailed README file summarizing the analysis."""
     column_types = df.dtypes.value_counts()
     dtype_summary = "\n".join([f"- **{dtype}**: {count} columns" for dtype, count in column_types.items()])
 
-    # Extract dataset details
-    num_rows = df.shape[0]
-    num_columns = df.shape[1]
+    num_rows, num_columns = df.shape
     missing_count = df.isnull().sum().sum()
     missing_columns = df.isnull().any().sum()
     non_missing_columns = num_columns - missing_columns
 
-    # Meaningful insights for numerical columns (excluding IDs, etc.)
-    meaningful_numerical_columns = [col for col in df.select_dtypes(include=[np.number]).columns if is_meaningful_column(col, df)]
     numerical_summary = "\n".join(
-        [f"- **{col}**: Mean = {df[col].mean():.2f}, Std Dev = {df[col].std():.2f}" for col in meaningful_numerical_columns if df[col].nunique() > 2]
-    )  # Only include columns with more than 2 unique values for meaningful stats
-
-    # Insights for categorical columns
-    categorical_summary = "\n".join(
-        [f"- **{col}**: Top 5 categories - {', '.join(map(str, analyze_categorical_column(col, df)))}" for col in df.select_dtypes(exclude=[np.number]).columns[:1]]
+        [
+            f"- **{col}**: Mean = {df[col].mean():.2f}, Std Dev = {df[col].std():.2f}"
+            for col in df.select_dtypes(include=[np.number]).columns
+            if is_meaningful_column(col, df)
+        ]
     )
 
-    # Generate the visualizations markdown
-    plots_markdown = "\n".join(
-        [f"![{os.path.basename(plot)}]({os.path.join(output_dir, os.path.basename(plot))})" for plot in plot_paths]
-    ) if plot_paths else "No visualizations were generated due to data constraints or processing errors."
+    categorical_summary = "\n".join(
+        [
+            f"- **{col}**: Top categories - {', '.join(map(str, analyze_categorical_column(col, df)))}"
+            for col in df.select_dtypes(exclude=[np.number]).columns[:1]
+        ]
+    )
 
-    # Constructing the readme content
+    plots_markdown = "\n".join(
+        [f"![{os.path.basename(plot)}]({plot})" for plot in plot_paths]
+    ) if plot_paths else "No visualizations were generated."
+
     readme_content = f"""
 # Data Analysis Report
 
-Welcome to the data analysis report for your dataset! This document highlights the key findings and provides visualizations that help understand the data better. Dive in to explore the insights revealed during our analysis.
-
----
-
 ## Dataset Overview
 
-The dataset consists of **{num_rows} rows** and **{num_columns} columns**, offering a diverse range of information to analyze. Here's a breakdown of the column data types:
+The dataset contains **{num_rows} rows** and **{num_columns} columns**. Here's the data type breakdown:
 {dtype_summary}
 
-Of these:
-- **{missing_columns} columns** contain missing values.
-- **{non_missing_columns} columns** are fully populated.
-
----
+- **{missing_columns} columns** have missing values.
+- **{non_missing_columns} columns** are complete.
 
 ## Key Insights
 
-### Numerical Features:
+### Numerical Features
 {numerical_summary}
 
-### Categorical Features:
+### Categorical Features
 {categorical_summary}
-
----
 
 ## Visualizations
 
-To complement the analysis, the following visualizations were created:
-
 {plots_markdown}
 
----
+## Recommendations
 
-## Next Steps
-
-Based on this initial exploration, consider the following recommendations for further analysis:
-1. Investigate missing data and decide on appropriate strategies (e.g., imputation or removal).
-2. Explore the relationships between key variables using advanced statistical models or machine learning techniques.
-3. Consider deeper analysis on outliers, anomalies, or trends observed in the visualizations.
-
-Thank you for reviewing this report! We hope these insights help you make informed decisions or further explore the dataset. Stay curious and keep exploring!
+1. Address missing data using imputation or removal.
+2. Investigate relationships between variables.
+3. Explore advanced techniques for deeper insights.
 
 ---
-*Generated dynamically using Python. Have a great day analyzing your data!*
+
+*Generated dynamically using Python.*
 """
 
-    # Save the generated README content to a file
     readme_path = os.path.join(output_dir, 'README.md')
     with open(readme_path, 'w') as f:
         f.write(readme_content)
-
-    print(f"README.md created successfully: {readme_path}")
+    print(f"README.md created successfully at {readme_path}")
 
 def main(file_path):
     """Main function to run the analysis."""
